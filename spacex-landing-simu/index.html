@@ -1,0 +1,371 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SpaceX Starship Descent through Asteroid Field</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            background-color: #000;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            font-family: 'Courier New', monospace;
+        }
+        #gameCanvas {
+            border: 2px solid #fff;
+        }
+        #gameInfo {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            color: #fff;
+            font-size: 14px;
+        }
+    </style>
+</head>
+<body>
+    <canvas id="gameCanvas" width="700" height="600"></canvas>
+    <div id="gameInfo"></div>
+    <script>
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+        const gameInfo = document.getElementById('gameInfo');
+
+        const ship = {
+            x: 350,
+            y: 100,
+            width: 30,
+            height: 120,
+            dx: 0,
+            dy: 0,
+            thrust: 0,
+            angle: 0,
+            angularVelocity: 0,
+            landed: false
+        };
+
+        const game = {
+            width: 700,
+            height: 5000,
+            groundLevel: 4800,
+            cameraY: 0,
+            asteroids: []
+        };
+
+        const gravity = 0.05;
+        const thrustPower = 0.1;
+        const rotationPower = 0.0002;
+        const dragFactor = 0.99;
+        const inertiaFactor = 0.99;
+        let keys = {};
+        let gameState = 'playing';
+        let score = 0;
+        let fuelUsed = 0;
+        let endSceneAlpha = 0;
+
+        function generateAsteroids() {
+            const numAsteroids = 20;
+            for (let i = 0; i < numAsteroids; i++) {
+                game.asteroids.push({
+                    x: Math.random() * game.width,
+                    y: Math.random() * (game.groundLevel - 1000),
+                    radius: Math.random() * 15 + 5,
+                    roughness: Math.random() * 0.3 + 0.1,
+                    rotation: Math.random() * Math.PI * 2,
+                    vertices: Math.floor(Math.random() * 5) + 5
+                });
+            }
+        }
+
+        function drawShip() {
+            ctx.save();
+            ctx.translate(ship.x, ship.y - game.cameraY);
+            ctx.rotate(ship.angle);
+
+            // Main body
+            ctx.fillStyle = '#e6e6e6';
+            ctx.beginPath();
+            ctx.moveTo(-ship.width / 2, ship.height / 2);
+            ctx.lineTo(-ship.width / 2, -ship.height / 2 + 30);
+            ctx.quadraticCurveTo(-ship.width / 2, -ship.height / 2, 0, -ship.height / 2);
+            ctx.quadraticCurveTo(ship.width / 2, -ship.height / 2, ship.width / 2, -ship.height / 2 + 30);
+            ctx.lineTo(ship.width / 2, ship.height / 2);
+            ctx.closePath();
+            ctx.fill();
+
+            // Upper fins (trapezoids) - slightly smaller
+            ctx.fillStyle = '#c0c0c0';
+            ctx.beginPath();
+            ctx.moveTo(ship.width / 2, -ship.height / 2 + 35);
+            ctx.lineTo(ship.width * 0.9, -ship.height / 2 + 35);
+            ctx.lineTo(ship.width * 0.9, -ship.height / 2 + 20);
+            ctx.lineTo(ship.width / 2, -ship.height / 2 + 12);
+            ctx.closePath();
+            ctx.fill();
+
+            ctx.beginPath();
+            ctx.moveTo(-ship.width / 2, -ship.height / 2 + 35);
+            ctx.lineTo(-ship.width * 0.9, -ship.height / 2 + 35);
+            ctx.lineTo(-ship.width * 0.9, -ship.height / 2 + 20);
+            ctx.lineTo(-ship.width / 2, -ship.height / 2 + 12);
+            ctx.closePath();
+            ctx.fill();
+
+            // Lower fins (trapezoids)
+            ctx.beginPath();
+            ctx.moveTo(ship.width / 2, ship.height / 2);
+            ctx.lineTo(ship.width, ship.height / 2);
+            ctx.lineTo(ship.width, ship.height / 4);
+            ctx.lineTo(ship.width / 2, ship.height / 4 - 10);
+            ctx.closePath();
+            ctx.fill();
+
+            ctx.beginPath();
+            ctx.moveTo(-ship.width / 2, ship.height / 2);
+            ctx.lineTo(-ship.width, ship.height / 2);
+            ctx.lineTo(-ship.width, ship.height / 4);
+            ctx.lineTo(-ship.width / 2, ship.height / 4 - 10);
+            ctx.closePath();
+            ctx.fill();
+
+            // SpaceX text - moved to the left
+            ctx.save();
+            ctx.rotate(Math.PI / 2);
+            ctx.fillStyle = '#000';
+            ctx.font = '14px Arial';
+            ctx.textAlign = 'center';
+            ctx.fillText('SpaceX', 0, ship.width / 2 - 5); // Changed from +5 to -5
+            ctx.restore();
+
+            // Thrust
+            if (ship.thrust > 0) {
+                ctx.fillStyle = '#f84';
+                const thrustWidth = ship.width * 0.8;
+                const thrustHeight = Math.random() * 40 + 30;
+                ctx.beginPath();
+                ctx.moveTo(-thrustWidth / 2, ship.height / 2);
+                ctx.lineTo(0, ship.height / 2 + thrustHeight);
+                ctx.lineTo(thrustWidth / 2, ship.height / 2);
+                ctx.closePath();
+                ctx.fill();
+            }
+            
+            ctx.restore();
+        }
+
+        function drawSpace() {
+            const gradient = ctx.createLinearGradient(0, 0, 0, canvas.height);
+            gradient.addColorStop(0, "#000033");
+            gradient.addColorStop(1, "#660000");
+            ctx.fillStyle = gradient;
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+            // Stars
+            ctx.fillStyle = '#fff';
+            for (let i = 0; i < 100; i++) {
+                ctx.fillRect(
+                    Math.random() * canvas.width,
+                    Math.random() * canvas.height,
+                    1,
+                    1
+                );
+            }
+        }
+
+        function drawAsteroids() {
+            game.asteroids.forEach(asteroid => {
+                if (asteroid.y - game.cameraY > -100 && asteroid.y - game.cameraY < canvas.height + 100) {
+                    ctx.save();
+                    ctx.translate(asteroid.x, asteroid.y - game.cameraY);
+                    ctx.rotate(asteroid.rotation);
+                    ctx.beginPath();
+                    for (let i = 0; i < asteroid.vertices; i++) {
+                        const angle = (i / asteroid.vertices) * Math.PI * 2;
+                        const radius = asteroid.radius * (1 + Math.random() * asteroid.roughness);
+                        const x = Math.cos(angle) * radius;
+                        const y = Math.sin(angle) * radius;
+                        if (i === 0) {
+                            ctx.moveTo(x, y);
+                        } else {
+                            ctx.lineTo(x, y);
+                        }
+                    }
+                    ctx.closePath();
+                    ctx.fillStyle = '#8B4513';  // Brown color for asteroids
+                    ctx.fill();
+                    ctx.restore();
+                }
+            });
+        }
+
+        function drawGround() {
+            ctx.fillStyle = '#8b4513';
+            ctx.fillRect(0, game.groundLevel - game.cameraY, game.width, game.height - game.groundLevel);
+        }
+
+        function updateShip() {
+            if (ship.landed) return;
+
+            // Rotation
+            if (keys.ArrowLeft) ship.angularVelocity -= rotationPower;
+            if (keys.ArrowRight) ship.angularVelocity += rotationPower;
+
+            // Apply angular velocity with inertia
+            ship.angle += ship.angularVelocity;
+            ship.angularVelocity *= inertiaFactor;
+
+            // Thrust
+            if (keys.ArrowUp) {
+                ship.thrust = 1;
+                fuelUsed += 0.1;
+
+                // Apply thrust
+                const thrustForceX = Math.sin(ship.angle) * thrustPower;
+                const thrustForceY = -Math.cos(ship.angle) * thrustPower;
+                ship.dx += thrustForceX;
+                ship.dy += thrustForceY;
+            } else {
+                ship.thrust = 0;
+            }
+
+            // Apply gravity
+            ship.dy += gravity;
+
+            // Apply drag and inertia
+            ship.dx *= dragFactor;
+            ship.dy *= dragFactor;
+
+            // Update position
+            ship.x += ship.dx;
+            ship.y += ship.dy;
+
+            // Boundary checks
+            if (ship.x < 0) ship.x = game.width;
+            if (ship.x > game.width) ship.x = 0;
+            if (ship.y < 0) ship.y = 0;
+
+            // Update camera
+            game.cameraY = Math.max(0, ship.y - canvas.height / 2);
+
+            // Collision detection with asteroids
+            game.asteroids.forEach(asteroid => {
+                const dx = ship.x - asteroid.x;
+                const dy = ship.y - asteroid.y;
+                const distance = Math.sqrt(dx * dx + dy * dy);
+                if (distance < ship.width / 2 + asteroid.radius) {
+                    gameState = 'ending';
+                    gameInfo.textContent = "Crashed into an asteroid!";
+                }
+            });
+
+            // Landing check
+            if (ship.y + ship.height / 2 > game.groundLevel) {
+                ship.y = game.groundLevel - ship.height / 2;
+                const landingSpeed = Math.sqrt(ship.dx * ship.dx + ship.dy * ship.dy);
+                const landingAngle = Math.abs(ship.angle % (2 * Math.PI));
+
+                ship.landed = true;
+                ship.dx = 0;
+                ship.dy = 0;
+
+                if (landingSpeed <= 2 && landingAngle <= 0.1) {
+                    score = calculateScore(landingSpeed, landingAngle);
+                    gameInfo.textContent = `Perfect landing! Score: ${score}`;
+                } else if (landingSpeed <= 4 && landingAngle <= 0.2) {
+                    score = calculateScore(landingSpeed, landingAngle);
+                    gameInfo.textContent = `Good landing! Score: ${score}`;
+                } else {
+                    score = 0;
+                    gameInfo.textContent = `Crash landing! Score: ${score}`;
+                }
+
+                setTimeout(() => {
+                    gameState = 'ending';
+                }, 1000);
+            }
+
+            gameInfo.textContent = `Altitude: ${Math.floor(game.groundLevel - ship.y)}m, Speed: ${Math.sqrt(ship.dx*ship.dx + ship.dy*ship.dy).toFixed(2)}, Fuel used: ${fuelUsed.toFixed(1)}`;
+        }
+
+        function calculateScore(speed, angle) {
+            const speedScore = Math.max(0, 100 - speed * 25);
+            const angleScore = Math.max(0, 100 - angle * 500);
+            const fuelScore = Math.max(0, 100 - fuelUsed / 2);
+            return Math.floor((speedScore + angleScore + fuelScore) / 3);
+        }
+
+        function drawEndScene() {
+            ctx.fillStyle = `rgba(0, 0, 0, ${endSceneAlpha})`;
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+            if (endSceneAlpha >= 0.7) {
+                ctx.fillStyle = '#fff';
+                ctx.font = '30px Courier New';
+                ctx.textAlign = 'center';
+                ctx.fillText(`Final Score: ${score}`, canvas.width / 2, canvas.height / 2 - 50);
+                ctx.fillText(`Fuel Used: ${fuelUsed.toFixed(1)}`, canvas.width / 2, canvas.height / 2);
+                ctx.font = '20px Courier New';
+                ctx.fillText('Press SPACE to restart', canvas.width / 2, canvas.height / 2 + 50);
+            }
+
+            if (endSceneAlpha < 0.7) {
+                endSceneAlpha += 0.01;
+            }
+        }
+
+        function resetGame() {
+            ship.x = game.width / 2;
+            ship.y = 100;
+            ship.dx = 0;
+            ship.dy = 0;
+            ship.thrust = 0;
+            ship.angle = 0;
+            ship.angularVelocity = 0;
+            ship.landed = false;
+            gameState = 'playing';
+            score = 0;
+            fuelUsed = 0;
+            endSceneAlpha = 0;
+            game.cameraY = 0;
+            gameInfo.textContent = '';
+            game.asteroids = [];
+            generateAsteroids();
+        }
+
+        function gameLoop() {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            
+            drawSpace();
+            drawAsteroids();
+            drawGround();
+            drawShip();
+            updateShip();
+
+            if (gameState === 'ending') {
+                drawEndScene();
+            }
+            
+            requestAnimationFrame(gameLoop);
+        }
+
+        document.addEventListener('keydown', (e) => {
+            keys[e.code] = true;
+            if (e.code === 'Space' && gameState === 'ending' && endSceneAlpha >= 0.7) {
+                resetGame();
+            }
+        });
+
+        document.addEventListener('keyup', (e) => {
+            keys[e.code] = false;
+        });
+
+        generateAsteroids();
+        resetGame();
+        gameLoop();
+    </script>
+</body>
+</html>
